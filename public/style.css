@@ -1,0 +1,44 @@
+body {
+  background: #f2f4f8;
+  font-family: system-ui, sans-serif;
+}
+
+.card {
+  width: 420px;
+  margin: 40px auto;
+  background: white;
+  padding: 24px;
+  border-radius: 20px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,.1);
+}
+
+#avatar {
+  width: 120px;
+  margin: 20px auto;
+}
+
+#conversation {
+  text-align: left;
+  margin: 20px 0;
+}
+
+button {
+  background: #6c63ff;
+  color: white;
+  border: none;
+  padding: 14px 20px;
+  border-radius: 14px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.talking {
+  animation: bounce 0.15s infinite alternate;
+}
+
+@keyframes bounce {
+  from { transform: scale(1); }
+  to { transform: scale(1.05); }
+}
+
