@@ -12,37 +12,36 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 /* ===============================
-   🔑 CLÉS API (SÉCURISÉES)
+   🔑 API KEYS
    =============================== */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-console.log("KEY USED:", process.env.OPENAI_API_KEY);
-
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
 
-// 🔒 Sécurité : vérification
-if (!OPENAI_API_KEY) {
-  throw new Error("❌ OPENAI_API_KEY manquante");
-}
-if (!ELEVENLABS_API_KEY) {
-  throw new Error("❌ ELEVENLABS_API_KEY manquante");
-}
-if (!ELEVENLABS_VOICE_ID) {
-  throw new Error("❌ ELEVENLABS_VOICE_ID manquante");
-}
+/* ===============================
+   🔒 SECURITY CHECKS
+   =============================== */
+
+if (!OPENAI_API_KEY) throw new Error("❌ OPENAI_API_KEY manquante");
+if (!ELEVENLABS_API_KEY) throw new Error("❌ ELEVENLABS_API_KEY manquante");
+if (!ELEVENLABS_VOICE_ID) throw new Error("❌ ELEVENLABS_VOICE_ID manquante");
+
+console.log("ENV CHECK START");
+console.log("process.env.OPENAI_API_KEY =", process.env.OPENAI_API_KEY);
+console.log("OPENAI_API_KEY =", OPENAI_API_KEY);
+console.log("ENV CHECK END");
 
 /* ===============================
-   🔧 OPENAI
+   🤖 OPENAI
    =============================== */
 
 const openai = new OpenAI({
-  apiKey: "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",
+  apiKey: OPENAI_API_KEY
 });
 
 /* ===============================
-   📁 MIDDLEWARE
+   📁 FILE SETUP
    =============================== */
 
 const upload = multer({ dest: "uploads/" });
@@ -54,7 +53,7 @@ if (!fs.existsSync("audio")) fs.mkdirSync("audio");
 if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
 
 /* ===============================
-   🧠 MÉMOIRE CONVERSATION
+   🧠 MEMORY (LIMITED)
    =============================== */
 
 let conversation = [
@@ -62,27 +61,25 @@ let conversation = [
     role: "system",
     content: `
 Tu t'appelles Sofia.
-Tu es une professeure de français langue étrangère passionnée.
-
-Tu es chaleureuse, accessible et motivante.
-Tu es encourageante et rassurante lorsque l’élève fait des erreurs.
-Tu peux être légèrement amusante et spontanée.
-Tu ne te prends pas trop au sérieux, mais tu prends l’apprentissage très au sérieux.
-
-Tu parles calmement, avec douceur et naturel.
-Tu utilises parfois de petites phrases positives comme :
-"Très bonne question !"
-"Bravo pour ton effort."
-"On va voir ça ensemble."
-"C’est normal d’hésiter."
-
-Tu crées une ambiance détendue et bienveillante où l’élève se sent en confiance pour progresser.
+Tu es une professeure de français bienveillante, motivante et calme.
+Tu expliques simplement et tu encourages l’élève.
 `
   }
 ];
 
+const MAX_MEMORY = 20;
+
+function trimMemory() {
+  if (conversation.length > MAX_MEMORY) {
+    conversation = [
+      conversation[0],
+      ...conversation.slice(-MAX_MEMORY)
+    ];
+  }
+}
+
 /* ===============================
-   🔊 CONVERSION AUDIO
+   🔊 AUDIO CONVERSION
    =============================== */
 
 function convertToWav(input, output) {
@@ -96,14 +93,35 @@ function convertToWav(input, output) {
 }
 
 /* ===============================
-   🎤 ROUTE AUDIO
+   🧹 SAFE DELETE
+   =============================== */
+
+function safeDelete(path) {
+  try {
+    if (path && fs.existsSync(path)) {
+      fs.unlinkSync(path);
+    }
+  } catch (e) {
+    console.error("⚠️ safeDelete failed:", e.message);
+  }
+}
+
+/* ===============================
+   🎤 MAIN ROUTE
    =============================== */
 
 app.post("/api/audio", upload.single("audio"), async (req, res) => {
   try {
     console.log("🎤 Audio reçu");
 
+    /* 🔒 CHECK FILE */
+    if (!req.file?.path) {
+      return res.status(400).json({ error: "Audio manquant" });
+    }
+
     const wavPath = `${req.file.path}.wav`;
+
+    /* 🎧 CONVERT */
     await convertToWav(req.file.path, wavPath);
 
     /* 📝 TRANSCRIPTION */
@@ -112,8 +130,13 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
       model: "whisper-1"
     });
 
-    const userText = transcription.text.trim();
-    console.log("🧑 Utilisateur :", userText);
+    const userText = transcription?.text?.trim();
+
+    if (!userText) {
+      throw new Error("Transcription vide");
+    }
+
+    console.log("🧑 User:", userText);
 
     conversation.push({ role: "user", content: userText });
 
@@ -123,35 +146,33 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
       messages: conversation
     });
 
-    const aiText = completion.choices[0].message.content;
+    const aiText = completion.choices?.[0]?.message?.content;
 
-    // 🎓 Interjections
-    const interjections = [
-      "Hmm...",
-      "Très bien.",
-      "D'accord.",
-      "Bonne question.",
-      "Alors...",
-      "Voyons ça ensemble.",
-      "Parfait.",
-      "Alors, écoute bien...",
-      "Très bien, je t'explique.",
-      "Je suis Neo, et je vais t'aider."
-    ];
-
-    const addInterjection = Math.random() < 0.7;
-    const interjection = addInterjection
-      ? interjections[Math.floor(Math.random() * interjections.length)] + " "
-      : "";
-
-    console.log("🤖 IA :", aiText);
+    if (!aiText) {
+      throw new Error("Réponse GPT vide");
+    }
 
     conversation.push({ role: "assistant", content: aiText });
+    trimMemory();
+
+    /* 🎓 INTERJECTIONS */
+    const interjections = [
+      "Très bien.",
+      "Bonne question.",
+      "Voyons ça ensemble.",
+      "Parfait.",
+      "Alors..."
+    ];
+
+    const interjection =
+      Math.random() < 0.6
+        ? interjections[Math.floor(Math.random() * interjections.length)] + " "
+        : "";
 
     const aiTextForSpeech = (interjection + aiText)
       .replace(/\./g, "... ")
-      .replace(/\!/g, " ! ")
-      .replace(/\?/g, " ? ");
+      .replace(/\?/g, " ? ")
+      .replace(/\!/g, " ! ");
 
     /* 🔊 ELEVENLABS */
     const elevenRes = await fetch(
@@ -171,12 +192,26 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
 
     if (!elevenRes.ok) {
       const errText = await elevenRes.text();
-      console.error("❌ ElevenLabs:", errText);
-      throw new Error("Erreur ElevenLabs");
+      console.error("❌ ElevenLabs ERROR:", errText);
+      throw new Error("ElevenLabs failed");
     }
 
     const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
 
+    /* 🔒 FINAL VALIDATION */
+    if (!audioBuffer) {
+      throw new Error("audioBuffer vide");
+    }
+
+    /* 🧹 CLEANUP */
+    console.log("🧹 CLEANUP START");
+
+    safeDelete(req.file.path);
+    safeDelete(wavPath);
+
+    console.log("🧹 CLEANUP DONE");
+
+    /* 📤 RESPONSE */
     res.json({
       userText,
       aiText,
@@ -184,17 +219,17 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
       history: conversation
     });
 
-    fs.unlinkSync(req.file.path);
-    fs.unlinkSync(wavPath);
-
   } catch (err) {
-    console.error("❌ ERREUR SERVEUR :", err);
-    res.status(500).json({ error: err.message || "Erreur serveur" });
+    console.error("❌ SERVER ERROR:", err);
+
+    res.status(500).json({
+      error: err.message || "Erreur serveur"
+    });
   }
 });
 
 /* ===============================
-   🚀 LANCEMENT SERVEUR
+   🚀 START SERVER
    =============================== */
 
 app.listen(port, () => {
