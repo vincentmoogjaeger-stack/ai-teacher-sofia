@@ -192,32 +192,21 @@ const audioBuffer = Buffer.from(await speechResponse.arrayBuffer());
 
 const audioBase64 = audioBuffer.toString("base64");
 
-const audioBuffer = Buffer.from(
-  await speechResponse.arrayBuffer()
-);
+/* 🧹 CLEANUP */
+console.log("🧹 CLEANUP START");
 
-const audioBase64 = audioBuffer.toString("base64");
+safeDelete(req.file.path);
+safeDelete(wavPath);
 
-    /* 🔒 FINAL VALIDATION */
-    if (!audioBuffer) {
-      throw new Error("audioBuffer vide");
-    }
+console.log("🧹 CLEANUP DONE");
 
-    /* 🧹 CLEANUP */
-    console.log("🧹 CLEANUP START");
-
-    safeDelete(req.file.path);
-    safeDelete(wavPath);
-
-    console.log("🧹 CLEANUP DONE");
-
-    /* 📤 RESPONSE */
-    res.json({
-      userText,
-      aiText,
-      audioBase64: audioBuffer.toString("base64"),
-      history: conversation
-    });
+/* 📤 RESPONSE */
+res.json({
+  userText,
+  aiText,
+  audioBase64,
+  history: conversation
+});
 
   } catch (err) {
     console.error("❌ SERVER ERROR:", err);
