@@ -16,16 +16,12 @@ const port = process.env.PORT || 3000;
    =============================== */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
 
 /* ===============================
    🔒 SECURITY CHECKS
    =============================== */
 
 if (!OPENAI_API_KEY) throw new Error("❌ OPENAI_API_KEY manquante");
-if (!ELEVENLABS_API_KEY) throw new Error("❌ ELEVENLABS_API_KEY manquante");
-if (!ELEVENLABS_VOICE_ID) throw new Error("❌ ELEVENLABS_VOICE_ID manquante");
 
 console.log("ENV CHECK START");
 console.log("process.env.OPENAI_API_KEY =", process.env.OPENAI_API_KEY);
@@ -174,29 +170,33 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
       .replace(/\?/g, " ? ")
       .replace(/\!/g, " ! ");
 
-    /* 🔊 ELEVENLABS */
-    const elevenRes = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          text: aiTextForSpeech,
-          model_id: "eleven_multilingual_v2"
-        })
-      }
-    );
+ /* 🔊 OPENAI TEXT TO SPEECH */
 
-    if (!elevenRes.ok) {
-      const errText = await elevenRes.text();
-      console.error("❌ ElevenLabs ERROR:", errText);
-      throw new Error("ElevenLabs failed");
-    }
+const speechResponse = await openai.audio.speech.create({
+  model: "tts-1",
+  voice: "nova",
+  input: aiTextForSpeech,
+  instructions: `
+Tu es Sofia, une professeure de français.
 
-    const audioBuffer = Buffer.from(await elevenRes.arrayBuffer());
+Voix :
+- féminine
+- chaleureuse
+- calme
+- naturelle
+- pédagogique
+`
+});
+
+const audioBuffer = Buffer.from(await speechResponse.arrayBuffer());
+
+const audioBase64 = audioBuffer.toString("base64");
+
+const audioBuffer = Buffer.from(
+  await speechResponse.arrayBuffer()
+);
+
+const audioBase64 = audioBuffer.toString("base64");
 
     /* 🔒 FINAL VALIDATION */
     if (!audioBuffer) {
