@@ -1,64 +1,103 @@
-import dotenv from "dotenv";
-dotenv.config({ path: "./.env" });
 
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
+import fs from "fs";
 import express from "express";
 import multer from "multer";
-import fs from "fs";
 import ffmpeg from "fluent-ffmpeg";
-import fetch from "node-fetch";
 import OpenAI from "openai";
 
-const app = express();
-const port = process.env.PORT || 3000;
+/* =========================
+   PATH FIX (.env safe load)
+========================= */
 
-/* ===============================
-   🔑 API KEYS
-   =============================== */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, ".env") });
+
+/* =========================
+   ENV CHECK
+========================= */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-/* ===============================
-   🔒 SECURITY CHECKS
-   =============================== */
+if (!OPENAI_API_KEY) {
+  throw new Error("❌ OPENAI_API_KEY manquante dans .env");
+}
 
-if (!OPENAI_API_KEY) throw new Error("❌ OPENAI_API_KEY manquante");
+console.log("🔑 API KEY chargée OK");
 
-console.log("ENV CHECK START");
-console.log("process.env.OPENAI_API_KEY =", process.env.OPENAI_API_KEY);
-console.log("OPENAI_API_KEY =", OPENAI_API_KEY);
-console.log("ENV CHECK END");
-
-/* ===============================
-   🤖 OPENAI
-   =============================== */
+/* =========================
+   INIT OPENAI (ONE ONLY)
+========================= */
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY
 });
 
-/* ===============================
-   📁 FILE SETUP
-   =============================== */
+/* =========================
+   OPTIONAL OPENAI TEST
+   (SAFE, REMOVE LATER IF YOU WANT)
+========================= */
 
-const upload = multer({ dest: "uploads/" });
+async function testOpenAI() {
+  try {
+    console.log("🧪 TEST OPENAI START");
 
+    const models = await openai.models.list();
+
+    console.log("🟢 OPENAI OK");
+    console.log("📦 Models count:", models.data.length);
+
+  } catch (err) {
+    console.log("🔴 OPENAI ERROR:");
+    console.log(err.message);
+  }
+}
+
+setTimeout(testOpenAI, 100);
+
+/* =========================
+   EXPRESS SETUP
+========================= */
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.use(express.json());
 app.use(express.static("public"));
 app.use("/audio", express.static("audio"));
+
+/* =========================
+   FILE SETUP
+========================= */
+
+const upload = multer({ dest: "uploads/" });
 
 if (!fs.existsSync("audio")) fs.mkdirSync("audio");
 if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
 
-/* ===============================
-   🧠 MEMORY (LIMITED)
-   =============================== */
+/* =========================
+   MEMORY
+========================= */
 
 let conversation = [
   {
     role: "system",
     content: `
-Tu t'appelles Sofia.
-Tu es une professeure de français bienveillante, motivante et calme.
-Tu expliques simplement et tu encourages l’élève.
+Tu t'appelles Sofia, professeure de français.
+
+Règles :
+- 1 erreur max par réponse
+- explication simple
+- ton bienveillant
+- encourage toujours l'élève
+
+Si aucune erreur :
+"Très bien, aucune erreur 👍"
 `
   }
 ];
@@ -74,9 +113,9 @@ function trimMemory() {
   }
 }
 
-/* ===============================
-   🔊 AUDIO CONVERSION
-   =============================== */
+/* =========================
+   AUDIO CONVERT
+========================= */
 
 function convertToWav(input, output) {
   return new Promise((resolve, reject) => {
@@ -88,39 +127,40 @@ function convertToWav(input, output) {
   });
 }
 
-/* ===============================
-   🧹 SAFE DELETE
-   =============================== */
+/* =========================
+   SAFE DELETE
+========================= */
 
 function safeDelete(path) {
   try {
     if (path && fs.existsSync(path)) {
       fs.unlinkSync(path);
     }
-  } catch (e) {
-    console.error("⚠️ safeDelete failed:", e.message);
+  } catch (err) {
+    console.error("⚠️ delete error:", err.message);
   }
 }
 
-/* ===============================
-   🎤 MAIN ROUTE
-   =============================== */
+/* =========================
+   MAIN ROUTE
+========================= */
 
 app.post("/api/audio", upload.single("audio"), async (req, res) => {
   try {
     console.log("🎤 Audio reçu");
 
-    /* 🔒 CHECK FILE */
     if (!req.file?.path) {
       return res.status(400).json({ error: "Audio manquant" });
     }
 
     const wavPath = `${req.file.path}.wav`;
 
-    /* 🎧 CONVERT */
     await convertToWav(req.file.path, wavPath);
 
-    /* 📝 TRANSCRIPTION */
+    /* =========================
+       TRANSCRIPTION
+    ========================= */
+
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(wavPath),
       model: "whisper-1"
@@ -136,7 +176,10 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
 
     conversation.push({ role: "user", content: userText });
 
-    /* 🤖 GPT */
+    /* =========================
+       GPT RESPONSE
+    ========================= */
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: conversation
@@ -151,62 +194,51 @@ app.post("/api/audio", upload.single("audio"), async (req, res) => {
     conversation.push({ role: "assistant", content: aiText });
     trimMemory();
 
-    /* 🎓 INTERJECTIONS */
-    const interjections = [
-      "Très bien.",
-      "Bonne question.",
-      "Voyons ça ensemble.",
-      "Parfait.",
-      "Alors..."
-    ];
+    /* =========================
+       CLEAN TEXT FOR TTS
+    ========================= */
 
-    const interjection =
-      Math.random() < 0.6
-        ? interjections[Math.floor(Math.random() * interjections.length)] + " "
-        : "";
+    const aiTextClean = aiText
+      .split("Correction :")[0]
+      .trim();
 
-    const aiTextForSpeech = (interjection + aiText)
-      .replace(/\./g, "... ")
-      .replace(/\?/g, " ? ")
-      .replace(/\!/g, " ! ");
+    /* =========================
+       TTS
+    ========================= */
 
- /* 🔊 OPENAI TEXT TO SPEECH */
-
-const speechResponse = await openai.audio.speech.create({
-  model: "tts-1",
-  voice: "nova",
-  input: aiTextForSpeech,
-  instructions: `
-Tu es Sofia, une professeure de français.
-
+    const speechResponse = await openai.audio.speech.create({
+      model: "tts-1",
+      voice: "nova",
+      input: aiTextClean,
+      instructions: `
 Voix :
 - féminine
-- chaleureuse
 - calme
-- naturelle
 - pédagogique
+- naturelle
 `
-});
+    });
 
-const audioBuffer = Buffer.from(await speechResponse.arrayBuffer());
+    const audioBuffer = Buffer.from(await speechResponse.arrayBuffer());
+    const audioBase64 = audioBuffer.toString("base64");
 
-const audioBase64 = audioBuffer.toString("base64");
+    /* =========================
+       CLEANUP
+    ========================= */
 
-/* 🧹 CLEANUP */
-console.log("🧹 CLEANUP START");
+    safeDelete(req.file.path);
+    safeDelete(wavPath);
 
-safeDelete(req.file.path);
-safeDelete(wavPath);
+    /* =========================
+       RESPONSE
+    ========================= */
 
-console.log("🧹 CLEANUP DONE");
-
-/* 📤 RESPONSE */
-res.json({
-  userText,
-  aiText,
-  audioBase64,
-  history: conversation
-});
+    res.json({
+      userText,
+      aiText,
+      audioBase64,
+      history: conversation
+    });
 
   } catch (err) {
     console.error("❌ SERVER ERROR:", err);
@@ -217,9 +249,9 @@ res.json({
   }
 });
 
-/* ===============================
-   🚀 START SERVER
-   =============================== */
+/* =========================
+   START SERVER
+========================= */
 
 app.listen(port, () => {
   console.log(`🔥 Server actif → http://localhost:${port}`);
